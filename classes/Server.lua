@@ -23,7 +23,7 @@ end
 
 function Server:start()
     self:openRednet()
-
+    print("Hello updated world!")
     local depots = { rednet.lookup(protocols.DEPOT_LOOKUP) }
     for _, id in pairs(depots) do
         rednet.send(id, {type="DISPATCH_TRAIN", schedule = schedules.trackSchedule})

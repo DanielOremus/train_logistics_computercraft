@@ -1,6 +1,6 @@
 local function groupByKey(keyName, list)
     local group = {}
-    for index, value in ipairs(list) do
+    for _, value in ipairs(list) do
         group[value[keyName]] = value
     end
     return group
