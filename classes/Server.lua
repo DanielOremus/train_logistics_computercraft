@@ -1,21 +1,29 @@
 local operationsList = require("constants.operations")
-local helpers = require("utils.helpers")
+local printHelpers = require("utils.printHelpers")
+local tableHelpers = require("utils.tableHelpers")
 local protocols = require("constants.protocols")
 local schedules = require("constants.schedules")
-local groupByKey, printError = helpers.groupByKey, helpers.printError
+local msgTypeEnum = require("constants.msgTypeEnum")
+local groupByKey, printError, printInfo = tableHelpers.groupByKey, printHelpers.printError, printHelpers.printInfo
 
 local Server = {}
 Server.__index = Server
 
 Server.messageHandlers = {
-    SERVER_ERROR = function (self, sender, msg)
+    [msgTypeEnum.ERROR] = function (self, sender, msg)
         printError(msg.err)
+    end,
+    [msgTypeEnum.HANDSHAKE_CLIENT_STATION] = function (self,station,msg)
+        rednet.send(station, {
+            type = msgTypeEnum.HANDSHAKE_RES,
+            sender = string.format("Server (#%d)", self.id)
+        })
     end
 }
 
 function Server.new(operations)
     local instance = setmetatable({}, Server)
-    instance.serverModem = nil
+    instance.id = os.getComputerID()
     instance.operations = operations
     instance.operationsGroup = groupByKey("key", operations)
     return instance
@@ -23,7 +31,6 @@ end
 
 function Server:start()
     self:openRednet()
-    print("Hello updated world!")
     local depots = { rednet.lookup(protocols.DEPOT_LOOKUP) }
     for _, id in pairs(depots) do
         rednet.send(id, {type="DISPATCH_TRAIN", schedule = schedules.trackSchedule})
@@ -33,7 +40,9 @@ function Server:start()
         function ()
             while true do
                 local sender, msg = rednet.receive()
-                Server.messageHandlers[msg.type](self, sender, msg)
+                if Server.messageHandlers[msg.type] then
+                    Server.messageHandlers[msg.type](self, sender, msg)
+                end
             end
         end
     )
@@ -59,7 +68,7 @@ function Server:openRednet()
             os.sleep(3)
         end
     end
-    helpers.printInfo("Rednet opened on " .. #modems .. " modem(s).")
+    printInfo("Rednet opened on " .. #modems .. " modem(s).")
 end
 
 function Server:askOperation()

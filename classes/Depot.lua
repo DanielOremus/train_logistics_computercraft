@@ -1,21 +1,15 @@
 local stationConfig = require("config.station")
-local printError = require("utils.helpers").printError
-local printWarning = require("utils.helpers").printWarning
-local printInfo = require("utils.helpers").printInfo
-
+local printHelpers = require("utils.printHelpers")
+local printError, printWarning, printInfo = printHelpers.printError, printHelpers.printWarning, printHelpers.printInfo
+local msgTypeEnum = require("constants.msgTypeEnum")
 
 local protocols = require("constants.protocols")
 
 
---TODO: change self.stations to stations' computers (ask ai which better)
 --TODO: add main menu for operating with depot
---!? Test feature below:
---TODO: make train check availability using rednet (instead station:method)
 --TODO: make stations update feature, for adding or removing stations
 --TODO: refactor copy/paste class methods (make them reusable)
 --TODO: add main menu for stations
---TODO: push project to git
---TODO: any idea for cloning it to computer (ask ai)
 
 local Depot = {}
 Depot.__index = Depot
@@ -23,16 +17,17 @@ Depot.heartbeatInterval = 5
 Depot.stationOfflineTimeout = Depot.heartbeatInterval * 2 + 2
 
 Depot.messageHandlers = {
-    PING = function (self, sender, msg)
-        rednet.send(sender, {type = "PONG"})
+    [msgTypeEnum.PING] = function (self, sender, msg)
+        rednet.send(sender, {type = msgTypeEnum.PONG})
     end,
-    HEARTBEAT_RES = function (self, stationId, msg)
+    [msgTypeEnum.HEARTBEAT_RES] = function (self, stationId, msg)
         self.stations[stationId].status = stationConfig.statuses.ONLINE
         self.stations[stationId].train = msg.station.train
+        self.stations[stationId].name = msg.station.name
         self.stations[stationId].lastSeen = os.clock()
 
     end,
-    DISPATCH_TRAIN = function (self, server, msg)
+    [msgTypeEnum.DISPATCH_TRAIN] = function (self, server, msg)
         print("Got train request")
         local stationId
         for id, station in pairs(self.stations) do
@@ -42,27 +37,27 @@ Depot.messageHandlers = {
             end
         end
         if not stationId then
-            rednet.send(server, {type = "SERVER_ERROR", err = "No trains are available!"})
+            rednet.send(server, {type = msgTypeEnum.ERROR, err = "No trains are available!"})
         else
-            rednet.send(stationId, {type = "DISPATCH_TRAIN", schedule = msg.schedule})
+            rednet.send(stationId, {type = msgTypeEnum.DISPATCH_TRAIN, schedule = msg.schedule})
         end
     end,
-    DEPOT_ERROR = function (self, station, msg)
+    [msgTypeEnum.ERROR] = function (self, station, msg)
         local targets = {
             DEPOT = function ()
                 printError(msg.err)
             end,
             SERVER = function ()
-                rednet.send(self.serverId, {type = "SERVER_ERROR", err = msg.err})
+                rednet.send(self.serverId, {type = msgTypeEnum.ERROR, err = msg.err})
             end
         }
         targets[msg.target]()
     end,
-    REGISTER_STATION = function (self, sender, msg)
-        local station = self:prepareStation(msg.station)
+    [msgTypeEnum.HANDSHAKE_DEPOT_STATION] = function (self, stationId, msg)
+        local station = self:prepareStation(msg.payload)
         self:addStation(station)
-        rednet.send(sender, {type = "HANDSHAKE_RES"})
-        printInfo(string.format("Station '%s' (#%d) registered.", msg.station.name, msg.station.id))
+        rednet.send(stationId, {type = msgTypeEnum.HANDSHAKE_RES, sender = string.format("Depot '%s' (#%d)", self.name, self.id) })
+        printInfo(string.format("Station '%s' (#%d) registered.", station.name, station.id))
     end
 }
 
@@ -145,7 +140,7 @@ end
 function Depot:sendHeartbeat()
     --Sending heartbeat to all connected stations
     for _, station in pairs(self.stations) do
-        rednet.send(station.id, { type="HEARTBEAT" })
+        rednet.send(station.id, { type = msgTypeEnum.HEARTBEAT })
     end
 end
 

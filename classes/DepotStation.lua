@@ -1,33 +1,35 @@
 local Station = require("classes.Station")
-local printError = require("utils.helpers").printError
-local printInfo = require("utils.helpers").printInfo
+local printHelpers = require("utils.printHelpers")
+local printError, printWarning, printInfo = printHelpers.printError, printHelpers.printWarning, printHelpers.printInfo
+local msgTypeEnum = require("constants.msgTypeEnum")
 
 local DepotStation = {}
 DepotStation.__index = DepotStation
 setmetatable(DepotStation, Station)
 
 DepotStation.messageHandlers = {
-    HEARTBEAT = function (self, depot, msg)
+    [msgTypeEnum.HEARTBEAT] = function (self, depot, msg)
         self:getTrainName()
-        rednet.send(depot, { type = "HEARTBEAT_RES", station = {
+        rednet.send(depot, { type = msgTypeEnum.HEARTBEAT_RES, station = {
+            name = self.name,
             train = self.train
         }})
     end,
-    HANDSHAKE_RES = function (self, depot, msg)
+    [msgTypeEnum.HEARTBEAT_RES] = function (self, depot, msg)
         printInfo(string.format("Connected to Depot (#%d).", depot))
         self.hasHandshake = true
     end,
-    DISPATCH_TRAIN = function (self, depot, msg)
+    [msgTypeEnum.DISPATCH_TRAIN] = function (self, depot, msg)
         local schedule = msg.schedule
         local train = self:getTrainName()
         --Making a new presence check (train) for sure
         if not train then
-            rednet.send(depot, {type = "DEPOT_ERROR", target = "SERVER", err = string.format("No train at '%s' (#%d)", self.name, self.id)})
+            rednet.send(depot, {type = msgTypeEnum.ERROR, target = "SERVER", err = string.format("No train at '%s' (#%d)", self.name, self.id)})
             return
         end
         local success, err = pcall(self.setSchedule, self, schedule)
         if not success then
-            rednet.send(depot, {type = "DEPOT_ERROR", target = "SERVER", err = err})
+            rednet.send(depot, {type = msgTypeEnum.ERROR, target = "SERVER", err = err})
         else
             printInfo("Train '" .. train .. "' dispatched!")
         end
@@ -42,47 +44,43 @@ function DepotStation.new(stationData)
 end
 
 function DepotStation:init()
-    self:getStationBlock()
-    self:setBlockName()
+    printInfo(self.name)
+    Station.init(self)
     self:getTrainName()
-    self:openRednet()
     self:sendHandshake()
-    self:listenEvents()
     -- self:displayMainMenu()
+    -- self:listenDepot()
 end
 
-function DepotStation:sendHandshake()
-    rednet.send(self.depotId, { 
-        type = "REGISTER_STATION",
-        station = {
-            id = self.id, 
-            name = self.name, 
-            listening = self.listening,
-            train = self.train
-        }
-    })
-end
-
-function DepotStation:listenEvents()
+function DepotStation:listenDepot()
     self.listening = true
-    self.handshakeTimer = os.startTimer(5)
 
     while self.listening do
-        local event, p1, p2, p3 = os.pullEvent()
+        local event, p1, p2 = os.pullEvent()
         if event == "rednet_message" then
-            local sender, msg, protocol = p1, p2, p3
+            local sender, msg = p1, p2
             self:handleMessage(sender, msg)
-        elseif event == "timer" and p1 == self.handshakeTimer then
-            if not self.hasHandshake then
-                printError("No response from depot!")
-                self:sendHandshake()
-                self.handshakeTimer = os.startTimer(5)
-            end
         elseif event == "key" and p1 == keys.q then
             self.listening = false
             self:displayMainMenu()
         end
     end
+end
+
+function DepotStation:getHandshakeTargetId()
+    return self.depotId
+end
+
+function DepotStation:getHandshakeMsgType()
+    return msgTypeEnum.HANDSHAKE_DEPOT_STATION
+end
+
+function DepotStation:buildHandshakePayload()
+    return {
+        id = self.id,
+        name = self.name,
+        train = self.train
+    }
 end
 
 function DepotStation:displayMainMenu()

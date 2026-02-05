@@ -11,23 +11,13 @@ function UpdateManager.new()
 end
 
 function UpdateManager:initUpdate()
-    local paths = self:getRepoFilesPaths(self.repoName)
+    self:openRednet()
+    UpdateManager.getDevId()
+    self:getRepoFilesPaths()
     if not fs.exists(self.repoName) then
         fs.makeDir(self.repoName)
     end
-    self:openRednet()
-    UpdateManager.getDevId()
-    for _, filePath in pairs(paths) do
-        self:sendFileRequest(filePath)
-    end
-    while self.received < self.expected do
-        local _, sender, msg = os.pullEvent("rednet_message")
-
-        if sender == self.DEV_ID and msg.type == "FILE" then
-            self:onFileReceive(msg)
-        end
-    end
-    print("[INFO] Files updated!")
+    self:updateFiles()
     rednet.close()
 end
 
@@ -43,20 +33,32 @@ function UpdateManager.getDevId()
     UpdateManager.DEV_ID = devId
 end
 
-function UpdateManager:getRepoFilesPaths(currentPath, paths)
-    local result = paths or {}
-    local list = fs.list(currentPath)
-    for _, value in pairs(list) do
-        local path = fs.combine(currentPath, value)
-        if fs.isDir(path) then
-            if fs.getName(path) ~= ".git" then
-                self:getRepoFilesPaths(path, result)
-            end
-        else
-            table.insert(result, path)
+function UpdateManager:updateFiles()
+    for _, filePath in pairs(self.paths) do
+        self:sendFileRequest(filePath)
+    end
+    while self.received < self.expected do
+        local _, sender, msg = os.pullEvent("rednet_message")
+        if sender == self.DEV_ID and msg.type == "FILE" then
+            self:onFileReceive(msg)
         end
     end
-    return result
+    print("[INFO] Files updated!")
+end
+
+function UpdateManager:getRepoFilesPaths()
+    rednet.send(self.DEV_ID, {
+        type = "GET_PATHS",
+        repoName = self.repoName
+    })
+    local sender = nil
+    local msg = {}
+    while msg.type ~= "PATHS" or sender ~= self.DEV_ID do
+        sender, msg = rednet.receive()
+    end
+    print("[INFO] Got repo structure!")
+    self.paths = msg.paths or {}
+    return msg.paths
 end
 
 function UpdateManager:onFileReceive(msg)
